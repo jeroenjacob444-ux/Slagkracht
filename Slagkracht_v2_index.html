@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07111f">
+<title>Slagkracht 2</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07111f;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+button{font:900 17px Arial;border:0;border-radius:16px;padding:14px 18px;background:#ffd62f;color:#17202b;box-shadow:0 5px 0 #aa8500}
+button:active{transform:translateY(3px);box-shadow:0 2px 0 #aa8500}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#03101bd9;z-index:20;padding:18px}
+.card{width:min(92vw,430px);max-height:90vh;overflow:auto;background:linear-gradient(145deg,#132d48,#0a1a2c);border:1px solid #456886;border-radius:26px;padding:22px;box-shadow:0 20px 70px #000b;text-align:center}
+h1{font-size:42px;margin:0 0 4px}h2{font-size:29px;margin:0 0 12px}
+p{color:#cbd9e7;line-height:1.4;margin:9px 0}
+.row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.shopgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.item{background:#0b2035;border:1px solid #31536e;border-radius:16px;padding:12px}
+.item b{display:block;margin-bottom:5px}.item span{font-size:13px;color:#a9bfd2}
+.small{font-size:12px;color:#8fa7bb}
+.hidden{display:none!important}
+#toast{position:fixed;left:50%;top:15%;transform:translateX(-50%);z-index:30;background:#061827ee;border:1px solid #5d7f9a;border-radius:18px;padding:12px 18px;font-weight:900;font-size:20px;opacity:0;pointer-events:none;transition:.2s}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<canvas id="g"></canvas>
+<div id="toast"></div>
+
+<div id="menu" class="overlay">
+<div class="card">
+<h1>🏏 SLAGKRACHT</h1>
+<p><b>De ultieme slag bepaalt je vlucht.</b></p>
+<p>Perfecte timing geeft meer snelheid, betere hoeken en meer munten. Daarna bestuur je het object over een gevaarlijk parcours.</p>
+<div class="row">
+<button id="play">🎯 SPELEN</button>
+<button id="shop">🔧 GARAGE</button>
+</div>
+<p class="small">Tik tijdens de vlucht links/rechts. Verzamel 🪙, pak boost-ringen en vermijd obstakels.</p>
+</div>
+</div>
+
+<div id="garage" class="overlay hidden">
+<div class="card">
+<h2>🔧 GARAGE</h2>
+<p>Munten: <b id="coins">0</b> 🪙</p>
+<div class="shopgrid">
+<div class="item"><b>🥄 Houten knuppel</b><span>Start · gratis</span><br><button data-item="wood">UITGERUST</button></div>
+<div class="item"><b>⚡ Carbon knuppel</b><span>+12% snelheid · 250 🪙</span><br><button data-item="carbon">KOPEN</button></div>
+<div class="item"><b>🚀 Rocket knuppel</b><span>+25% snelheid · 650 🪙</span><br><button data-item="rocket">KOPEN</button></div>
+<div class="item"><b>⚽ Superbal</b><span>+20% glijduur · 400 🪙</span><br><button data-item="superball">KOPEN</button></div>
+</div>
+<button id="back">TERUG</button>
+</div>
+</div>
+
+<div id="gameover" class="overlay hidden">
+<div class="card">
+<h2 id="endTitle">RUN KLAAR!</h2>
+<div id="final" style="font-size:39px;font-weight:900"></div>
+<p id="stats"></p>
+<div class="row"><button id="again">🔄 OPNIEUW</button><button id="home">🏠 MENU</button></div>
+</div>
+</div>
+
+<script>
+(()=>{"use strict";
+const c=document.getElementById('g'),x=c.getContext('2d');
+let W,H,S=1,last=0,mode='menu',time=0;
+let meter=0.15,mDir=1,power=0,angle=0,phase=0;
+let dist=0,speed=0,lane=.5,coins=Number(localStorage.getItem('skCoins')||0),best=Number(localStorage.getItem('skBest')||0);
+let combo=0,runCoins=0,boost=0,shake=0,wind=0,club=localStorage.getItem('skClub')||'wood',ball=localStorage.getItem('skBall')||'normal';
+let obs=[],rings=[],particles=[],trail=[];
+const clubs={wood:{mult:1,cost:0},carbon:{mult:1.12,cost:250},rocket:{mult:1.25,cost:650}};
+const $=id=>document.getElementById(id);
+function resize(){W=innerWidth;H=innerHeight;S=Math.min(devicePixelRatio||1,2);c.width=W*S;c.height=H*S;x.setTransform(S,0,0,S,0,0)} addEventListener('resize',resize);resize();
+function save(){localStorage.setItem('skCoins',coins);localStorage.setItem('skBest',best);localStorage.setItem('skClub',club);localStorage.setItem('skBall',ball)}
+function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),900)}
+function show(id){$(id).classList.remove('hidden')} function hide(id){$(id).classList.add('hidden')}
+function start(){mode='aim';time=0;meter=.12;mDir=1;power=0;angle=0;phase=0;dist=0;speed=0;lane=.5;combo=0;runCoins=0;boost=0;obs=[];rings=[];particles=[];trail=[];wind=(Math.random()-.5)*.8;hide('menu');hide('gameover');toast('TIMING! Tik in de groene zone')}
+$('play').onclick=start;
+$('again').onclick=start;
+$('home').onclick=()=>{mode='menu';hide('gameover');show('menu')};
+$('shop').onclick=()=>{hide('menu');updateShop();show('garage')};
+$('back').onclick=()=>{hide('garage');show('menu')};
+
+document.querySelectorAll('[data-item]').forEach(b=>b.onclick=()=>{
+ let item=b.dataset.item;
+ if(item==='wood'){club='wood';save();updateShop();toast('Houten knuppel uitgerust');return}
+ if(item==='carbon'||item==='rocket'){
+  if(club===item){toast('Al uitgerust');return}
+  if(coins<clubs[item].cost){toast('Niet genoeg munten');return}
+  coins-=clubs[item].cost;club=item;save();updateShop();toast('Nieuwe knuppel! ⚡');return
+ }
+ if(item==='superball'){
+  if(ball==='superball'){toast('Al uitgerust');return}
+  if(coins<400){toast('Niet genoeg munten');return}
+  coins-=400;ball='superball';save();updateShop();toast('Superbal uitgerust! ⚽');return
+ }
+});
+function updateShop(){
+ $('coins').textContent=coins;
+ document.querySelectorAll('[data-item]').forEach(b=>{
+  let it=b.dataset.item;
+  if(it==='wood')b.textContent=club==='wood'?'UITGERUST':'UITRUSTEN';
+  if(it==='carbon')b.textContent=club==='carbon'?'UITGERUST':(coins>=250?'KOOP 250 🪙':'250 🪙');
+  if(it==='rocket')b.textContent=club==='rocket'?'UITGERUST':(coins>=650?'KOOP 650 🪙':'650 🪙');
+  if(it==='superball')b.textContent=ball==='superball'?'UITGERUST':(coins>=400?'KOOP 400 🪙':'400 🪙');
+ })
+}
+
+c.addEventListener('pointerdown',e=>{
+ if(mode==='aim'){strike()}
+ else if(mode==='slide'){let dir=e.clientX<W/2?-1:1;lane+=dir*.12;lane=Math.max(.14,Math.min(.86,lane));combo=0}
+});
+function strike(){
+ let d=Math.abs(meter-.5), quality=Math.max(0,1-d/.5);
+ power=quality;
+ let a=(meter-.5)*46;
+ angle=a;
+ let base=(9+quality*27)*clubs[club].mult;
+ if(ball==='superball')base*=1.08;
+ speed=base;
+ if(d<.045){speed+=9;combo=1;toast('🔥 PERFECT! +9 snelheid');burst(W/2,H*.76,'#ffe45b',22)}
+ else if(d<.13){combo=1;toast('💥 GOED!');burst(W/2,H*.76,'#7de3ff',12)}
+ else {toast('😬 MIS!');burst(W/2,H*.76,'#ff7667',8)}
+ mode='slide';phase=0;
+}
+function spawnObstacle(){
+ let lanePick=Math.floor(Math.random()*4)/3;
+ obs.push({x:.18+lanePick*.64,y:-70,r:18+Math.random()*13,type:Math.random()<.5?'rock':Math.random()<.6?'cone':'ice'});
+}
+function spawnRing(){rings.push({x:.18+Math.random()*.64,y:-80,r:24})}
+function burst(px,py,col,n){for(let i=0;i<n;i++)particles.push({x:px,y:py,vx:(Math.random()-.5)*7,vy:(Math.random()-.8)*7,l:1,col})}
+function update(dt){
+ time+=dt;
+ if(mode==='aim'){
+  meter+=mDir*dt*.95;
+  if(meter>=1){meter=1;mDir=-1} if(meter<=0){meter=0;mDir=1}
+ }
+ if(mode==='slide'){
+  // gentle decay, with boost and ball bonuses
+  let decay=ball==='superball'?.988:.983;
+  speed*=Math.pow(decay,dt*60);
+  if(boost>0){speed*=1.018;boost-=dt}
+  dist+=speed*dt*1.42;
+  phase+=dt;
+  const scroll=(75+speed*17)*dt;
+  obs.forEach(o=>o.y+=scroll);rings.forEach(r=>r.y+=scroll);
+  if(Math.random()<dt*(1.25+speed/28))spawnObstacle();
+  if(Math.random()<dt*.55)spawnRing();
+  const px=W*lane,py=H*.76;
+  for(const o of obs){
+   if(Math.abs(px-W*o.x)<o.r+17 && Math.abs(py-o.y)<o.r+28 && o.y>H*.58){
+    speed*=.48;combo=0;shake=10;burst(px,py,'#ff8c61',14);toast('💥 OBSTAKEL!');o.y+=110;
+   }
+  }
+  for(let i=rings.length-1;i>=0;i--){
+   let r=rings[i];
+   if(Math.abs(px-W*r.x)<30 && Math.abs(py-r.y)<35){
+    boost=2.2;runCoins+=10;combo++;speed+=5;burst(px,py,'#ffe45b',18);toast('⚡ BOOST! +10 🪙');rings.splice(i,1);
+   }
+  }
+  obs=obs.filter(o=>o.y<H+100);rings=rings.filter(r=>r.y<H+100);
+  if(speed<2.1&&dist>8)finish('RUN KLAAR!');
+  if(dist>=1000)finish('LEGENDARISCH! 🏆');
+ }
+ for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=.2;p.l-=dt*1.8;if(p.l<=0)particles.splice(i,1)}
+ if(mode==='slide'){trail.push({x:W*lane,y:H*.76,l:1});if(trail.length>35)trail.shift()}
+ if(shake>0)shake*=.84;
+}
+function finish(title){
+ mode='over';runCoins+=Math.floor(dist/12)+combo*5;coins+=runCoins;
+ let newBest=dist>best;if(newBest)best=dist;save();
+ $('endTitle').textContent=title;
+ $('final').textContent=dist.toFixed(1)+' m';
+ $('stats').innerHTML=(newBest?'🏆 <b>NIEUW RECORD!</b><br>':'Beste: '+best.toFixed(1)+' m<br>')+'🪙 +'+runCoins+' munten · combo x'+Math.max(1,combo);
+ show('gameover');
+}
+function round(a,b,w,h,r,col){x.fillStyle=col;x.beginPath();x.roundRect(a,b,w,h,r);x.fill()}
+function text(s,a,b,size,align='center',col='#fff',weight='900'){x.fillStyle=col;x.font=weight+' '+size+'px Arial';x.textAlign=align;x.fillText(s,a,b)}
+function draw(){
+ x.save();if(shake>1)x.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
+ let bg=x.createLinearGradient(0,0,0,H);
+ bg.addColorStop(0,'#0b63aa');bg.addColorStop(.45,'#7bd0e8');bg.addColorStop(1,'#d8f5f5');x.fillStyle=bg;x.fillRect(0,0,W,H);
+ // scenery changes subtly with distance
+ x.fillStyle='#effbff';x.beginPath();x.moveTo(0,H*.34);x.lineTo(W*.15,H*.09);x.lineTo(W*.3,H*.32);x.lineTo(W*.46,H*.12);x.lineTo(W*.64,H*.31);x.lineTo(W*.82,H*.08);x.lineTo(W,H*.3);x.lineTo(W,H*.48);x.lineTo(0,H*.48);x.fill();
+ // track
+ x.fillStyle='#bcecf3';x.beginPath();x.moveTo(W*.04,H);x.lineTo(W*.34,H*.39);x.lineTo(W*.66,H*.39);x.lineTo(W*.96,H);x.closePath();x.fill();
+ x.strokeStyle='#fff8';x.lineWidth=2;
+ for(let y=H*.44+(dist*3%80);y<H;y+=80){x.beginPath();x.moveTo(W*.12,y);x.lineTo(W*.88,y);x.stroke()}
+ // wind
+ text('WIND '+(wind>0?'→':'←')+' '+Math.abs(wind*10).toFixed(0),W/2,105,13,'center','#e9f8ff','700');
+ // signs
+ for(let n=100;n<=900;n+=100){let sy=H*.73-(n-dist)*1.9;if(sy>H*.4&&sy<H*.92){round(W*.11,sy-14,62,29,5,'#163b5d');text(n+'m',W*.141,sy+7,13)}}
+ // trail
+ for(const q of trail){x.globalAlpha=q.l*.35;x.fillStyle='#fff';x.beginPath();x.arc(q.x,q.y,7,0,7);x.fill();q.l-=.025}x.globalAlpha=1;
+ if(mode==='aim')drawAim();if(mode==='slide')drawSlide();
+ // HUD
+ round(13,13,155,63,17,'#041a2dcc');text('🏆 '+best.toFixed(1)+' m',25,50,22,'left');
+ round(W-142,13,129,63,17,'#041a2dcc');text('🪙 '+coins, W-130,51,22,'left');
+ x.restore();
+}
+function drawAim(){
+ text('KIES JE MOMENT',W/2,H*.48,25,'center','#102c46');
+ const x0=W*.09,y=H*.54,w=W*.82,h=32;
+ round(x0,y,w,h,17,'#b9363a');x.fillStyle='#e7bf2d';x.fillRect(x0+w*.25,y,w*.5,h);x.fillStyle='#65d43c';x.fillRect(x0+w*.44,y,w*.12,h);
+ x.fillStyle='#fff';x.fillRect(x0+w*meter-4,y-10,8,h+20);
+ text('ROOD = SLECHT   GEEL = GOED   GROEN = PERFECT',W/2,H*.62,12);
+ // player and club
+ x.fillStyle='#202b35';x.beginPath();x.arc(W/2,H*.73,27,0,7);x.fill();
+ x.fillStyle='#d59c58';x.fillRect(W/2-8,H*.75,16,72);
+ x.strokeStyle=club==='rocket'?'#8fe7ff':club==='carbon'?'#c6cbd2':'#9a6630';x.lineWidth=10;x.beginPath();x.moveTo(W/2+9,H*.8);x.lineTo(W*.67,H*.87);x.stroke();
+ x.fillStyle='#fff';x.beginPath();x.arc(W*.69,H*.87,13,0,7);x.fill();
+ text(club==='rocket'?'🚀 ROCKET CLUB':club==='carbon'?'⚡ CARBON CLUB':'🥄 HOUTEN CLUB',W/2,H*.94,14);
+}
+function drawSlide(){
+ // rings
+ for(const r of rings){x.strokeStyle='#ffe45b';x.lineWidth=6;x.beginPath();x.arc(W*r.x,r.y,r.r,0,7);x.stroke();text('⚡',W*r.x,r.y+7,18)}
+ // obstacles
+ for(const o of obs){
+  if(o.type==='rock'){x.fillStyle='#4d6975';x.beginPath();x.arc(W*o.x,o.y,o.r,0,7);x.fill();x.fillStyle='#78909a';x.beginPath();x.arc(W*o.x-5,o.y-5,o.r*.35,0,7);x.fill()}
+  else if(o.type==='cone'){x.fillStyle='#ed713c';x.beginPath();x.moveTo(W*o.x,o.y-o.r);x.lineTo(W*o.x-o.r*.75,o.y+o.r);x.lineTo(W*o.x+o.r*.75,o.y+o.r);x.closePath();x.fill();x.fillStyle='#fff';x.fillRect(W*o.x-o.r*.45,o.y+2,o.r*.9,5)}
+  else{x.fillStyle='#75c7dc';x.beginPath();x.ellipse(W*o.x,o.y,o.r*1.4,o.r*.65,0,0,7);x.fill()}
+ }
+ // player ball
+ x.fillStyle=ball==='superball'?'#ffef68':'#fff';x.beginPath();x.arc(W*lane,H*.76,17,0,7);x.fill();
+ if(boost>0){x.strokeStyle='#ffe45b';x.lineWidth=5;x.beginPath();x.arc(W*lane,H*.76,27+Math.sin(time*12)*3,0,7);x.stroke()}
+ round(W*.28,82,W*.44,55,17,'#041a2dcc');text(dist.toFixed(1)+' m',W/2,118,27);
+ text(boost>0?'⚡ BOOST!': '← LINKS      RECHTS →',W/2,H-24,14);
+}
+function loop(now){let dt=Math.min(.04,(now-last)/1000||0);last=now;update(dt);draw();requestAnimationFrame(loop)}
+updateShop();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
